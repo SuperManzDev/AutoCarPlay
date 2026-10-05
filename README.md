@@ -1,77 +1,65 @@
-# MANZ CarPlay (AutoCarPlay) ⚡🚗
+# MANZ CarPlay
 
-> **Automotive CarPlay Control Center & Hotspot Automation for Legacy Android Tablets (Android 7.0+ / API 24+)**
+Launcher and background service that enables wireless Apple CarPlay on Android 7.0+ tablets without an external USB adapter.
 
 ![CarPlay Dashboard](docs/screenshots/carplay_dashboard_redacted.png)
 
-## Overview
-
-**MANZ CarPlay (`com.car.autocarplay`)** is an automotive launcher and background daemon engineered to enable **wireless Apple CarPlay on legacy Android tablets** (such as MediaTek MT8167B / Benesse Challenge Pad 3 / Android 7.0 Nougat) connecting to iPhones **without requiring an external USB dongle**.
-
-It manages the Wi-Fi SoftAP access point (`MNZCARPLAY`), bypasses Android 7 kernel network isolation via policy routing injection, optimizes CPU/GPU governor settings, and automatically wakes and launches CarPlay when car power is detected.
-
----
-
 ## Screenshots
 
-| Live CarPlay Dashboard | App Grid |
+| Dashboard | App grid |
 | :---: | :---: |
 | ![Dashboard](docs/screenshots/carplay_dashboard_redacted.png) | ![Apps](docs/screenshots/carplay_appgrid.png) |
 
-| Launcher Control Center UI |
+| Controller interface |
 | :---: |
 | ![Launcher](docs/screenshots/launcher_ui.png) |
 
----
+## What it does
 
-## Features
+- Wakes the tablet, sets brightness to maximum, and starts the CarPlay receiver when USB or 12V charger power is detected.
+- Starts a local Wi-Fi hotspot (`MNZCARPLAY`) on Android 7 using reflection on `IWifiManager.setWifiApEnabled`.
+- Adds Linux kernel policy routing rules so non-root apps can communicate over the `ap0` interface via IPv6 link-local and TCP port 7000.
+- Runs a bundled `dnsmasq` instance on `ap0` to serve DHCP leases to connected phones.
+- Drops background apps and pins all 4 CPU cores online on MediaTek MT8167B hardware to reduce frame drops during H.264 video decoding.
+- Keeps ADB open on TCP port 5555 for remote management.
 
-1. **Auto-Launch on Car Charger Power**:
-   - `BootReceiver` and `PowerMonitorService` monitor `ACTION_POWER_CONNECTED` and `BOOT_COMPLETED`.
-   - Automatically wakes screen (`FLAG_KEEP_SCREEN_ON` / keyevent 224), sets max brightness, launches SoftAP, applies routing, and starts CarPlay when you start the car engine.
-2. **Native SoftAP via Reflection (`TestAp`)**:
-   - Invokes `IWifiManager.setWifiApEnabled(WifiConfiguration, boolean)` via root `app_process` to broadcast a dedicated 2.4GHz/5GHz car network (`MNZCARPLAY`).
-3. **Android 7 Kernel Policy Routing Injection**:
-   - Overcomes Android 7's `32000: unreachable` table rule by injecting priority routes for `table main` and `table 1014`, allowing regular app UIDs to route Bonjour mDNS and IPv6 link-local TCP 7000 connections.
-4. **MediaTek MT8167B Turbo Boost**:
-   - Terminates non-essential background processes (`Settings`, file explorers, store services).
-   - Forces all 4 CPU cores online (`cpu0-3`), tunes cpufreq interactive governor, and reprioritizes `media.codec` and `surfaceflinger` with negative nice values for smooth 60 fps streaming.
-5. **Wireless ADB Maintenance**:
-   - Keeps ADB port 5555 active for remote wireless debugging and vehicle diagnostics.
+## How it works
 
----
+Older versions of Android isolate network routing between UIDs. On Android 7, apps without system privileges are blocked by default from resolving local routes on tethered interfaces. MANZ CarPlay uses temp root permissions (`mtk-su`) during initialization to insert routing priorities:
 
-## Technical Details
+```sh
+ip rule add from all lookup main pref 99
+ip -6 rule add from all lookup main pref 99
+ip -6 rule add from all lookup 1014 pref 98
+ip -6 route add fe80::/64 dev ap0 table main
+ip route add default dev ap0 table main
+```
 
-- **Target Architecture**: Android 7.0 (API 24), Java 8 Bytecode, DEX format 035/037.
-- **Hotspot Subnet**: `192.168.43.1/24`, IPv6 Link-Local `fe80::/64`.
-- **DHCP Engine**: Bundled `dnsmasq` instance on `ap0`.
-- **CarPlay Backend**: Compatible with DiPlay / xcertplay receiver.
+This lets CarPlay receivers such as DiPlay or xcertplay discover the iPhone over Bonjour and accept the AirPlay stream without requiring system image modifications.
 
----
+## Building from source
 
-## Building from Source
+Requirements:
+- JDK 8 or higher
+- Android SDK build tools (AAPT, D8, zipalign, apksigner)
+- Android API 24 platform (`android-24`)
 
-Prerequisites:
-- JDK 8 or JDK 17/21
-- Android Build-Tools (AAPT, D8, Zipalign, Apksigner)
-- Android SDK Platform `android-24` or higher
+Run the build script:
 
-To build the APK:
 ```powershell
 .\build.ps1
 ```
-The output APK is generated at `MANZCarPlay.apk`.
 
-To install to an attached device:
+The compiled package is saved as `MANZCarPlay.apk`.
+
+Install it via ADB:
+
 ```powershell
 adb install -r MANZCarPlay.apk
 adb shell "appops set com.car.autocarplay WRITE_SETTINGS allow"
 ```
 
----
-
 ## License
 
-This project is licensed under the [GNU General Public License v3.0](LICENSE).
-CarPlay is a registered trademark of Apple Inc.
+GPL-3.0. See [LICENSE](LICENSE) for details.
+CarPlay is a trademark of Apple Inc.
